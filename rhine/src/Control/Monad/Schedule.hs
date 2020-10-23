@@ -17,6 +17,7 @@ module Control.Monad.Schedule where
 import Data.Ord (comparing)
 import Control.Arrow (Arrow(second))
 import Control.Concurrent
+import qualified Control.Concurrent as C
 import Control.Category ((>>>))
 import Control.Monad (join)
 import Data.Functor.Classes
@@ -77,6 +78,20 @@ runScheduleIO
   :: (MonadIO m, Integral n)
   => ScheduleT n m a -> m a
 runScheduleIO = runScheduleT $ liftIO . threadDelay . (* 1000) . fromIntegral
+
+-- | A monad for scheduling with cooperative concurrency.
+type YieldT = ScheduleT ()
+
+-- | Let another thread wake up.
+yield :: Monad m => YieldT m ()
+yield = wait ()
+
+-- | Run a 'YieldT' value in a 'MonadIO',
+--   interpreting 'yield's as GHC concurrency yields.
+runYieldIO
+  :: MonadIO m
+  => YieldT m a -> m a
+runYieldIO = runScheduleT $ const $ liftIO $ C.yield
 
 instance Ord diff => MonadSchedule (Wait diff) where
   schedule waits = let (smallestWait :| waits') = N.sortBy compareWait waits in (, waits') <$> smallestWait
