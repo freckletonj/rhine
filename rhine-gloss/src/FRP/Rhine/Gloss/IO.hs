@@ -15,7 +15,6 @@ module FRP.Rhine.Gloss.IO
   , GlossSimClockIO (..)
   , launchGlossThread
   , flowGlossIO
-  , glossConcurrently
   )
   where
 
@@ -38,6 +37,7 @@ import FRP.Rhine
 
 -- rhine-gloss
 import FRP.Rhine.Gloss.Common
+import Control.Monad.Schedule.Class
 
 -- * Gloss effects
 
@@ -47,6 +47,9 @@ type GlossEnv = (MVar Float, MVar Event, IORef Float, IORef Picture)
 newtype GlossConcT m a = GlossConcT
   { unGlossConcT :: ReaderT GlossEnv m a }
   deriving (Functor, Applicative, Monad, MonadTrans, MonadIO)
+
+instance (Monad m, MonadSchedule m) => MonadSchedule (GlossConcT m) where
+  schedule actions = GlossConcT $ fmap (second $ map GlossConcT) $ schedule $ unGlossConcT <$> actions
 
 withPicRef
   :: MonadIO m
@@ -146,21 +149,6 @@ flowGlossIO
   -> IO ()
 flowGlossIO settings = launchGlossThread settings . flow
 
--- | A schedule in the 'GlossConcT' transformer,
---   supplying the same backend connection to its scheduled clocks.
-glossConcurrently
-  :: ( Monad IO
-     , Clock (GlossConcT IO) cl1, Clock (GlossConcT IO) cl2
-     , Time cl1 ~ Time cl2
-     )
-  => Schedule (GlossConcT IO) cl1 cl2
-glossConcurrently = Schedule
-  $ \cl1 cl2 -> GlossConcT $ ReaderT
-  $ \vars -> first liftTransS
-  <$> initSchedule concurrently
-        (runGlossEnvClock vars cl1)
-        (runGlossEnvClock vars cl2)
-
 type RunGlossEnvClock cl = HoistClock (GlossConcT IO) IO cl
 
 runGlossEnvClock
@@ -171,5 +159,3 @@ runGlossEnvClock env unhoistedClock = HoistClock
   { monadMorphism = flip runReaderT env . unGlossConcT
   , ..
   }
-
--- FIXME And a schedule for gloss clocks and other clocks
