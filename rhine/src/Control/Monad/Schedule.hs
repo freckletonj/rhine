@@ -31,6 +31,7 @@ import Control.Monad.Trans.Free
 
 -- rhine
 import Control.Monad.Schedule.Class
+import FRP.Rhine.TimeDomain
 
 -- TODO Implement Time via StateT
 
@@ -83,7 +84,7 @@ instance Ord diff => MonadSchedule (Wait diff) where
 -- | Run each action one step until it is discovered which action(s) are pure, or yield next.
 --   If there is a pure action, it is returned,
 --   otherwise all actions are shifted to the time when the earliest action yields.
-instance (Num diff, Ord diff, Monad m) => MonadSchedule (ScheduleT diff m) where
+instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT diff m) where
   schedule
     =   fmap runFreeT
     >>> sequenceA
@@ -112,11 +113,11 @@ instance (Num diff, Ord diff, Monad m) => MonadSchedule (ScheduleT diff m) where
 
       -- Shift a waiting action by some duration
       shift
-        :: Num diff
+        :: TimeDifference diff
         => diff
         -> Wait diff a
         -> Wait diff a
-      shift diff1 (Wait diff2 a) = Wait (diff2 - diff1) a
+      shift diff1 (Wait diff2 a) = Wait (diff2 `difference` diff1) a
 
       -- Shift a list of free actions by the duration of the head
       -- (assuming the list is sorted).
@@ -124,7 +125,7 @@ instance (Num diff, Ord diff, Monad m) => MonadSchedule (ScheduleT diff m) where
       -- otherwise wait the minimum duration, give the continuation of the head,
       -- and shift the remaining actions by that minimum duration.
       shiftListOnce
-        :: Num diff
+        :: TimeDifference diff
         => NonEmpty (FreeF (Wait diff) a b)
         -> Either
              (a, [FreeF (Wait diff) a b]) -- Pure value has completed
@@ -137,7 +138,7 @@ instance (Num diff, Ord diff, Monad m) => MonadSchedule (ScheduleT diff m) where
       -- until one action returns as pure.
       -- Return its result, together with the remaining free actions.
       shiftList
-        :: (Num diff, Ord diff, Monad m)
+        :: (TimeDifference diff, Ord diff, Monad m)
         => NonEmpty (FreeF (Wait diff) a (ScheduleT diff m a))
         -> ScheduleT diff m (a, [FreeF (Wait diff) a (ScheduleT diff m a)])
       shiftList actions = case shiftListOnce actions of
