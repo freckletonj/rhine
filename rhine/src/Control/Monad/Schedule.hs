@@ -36,15 +36,14 @@ import FRP.Rhine.TimeDomain
 
 -- TODO Implement Time via StateT
 
-{- |
-A functor implementing a syntactical "waiting" action.
+-- * Waiting action
 
-* 'diff' represents the duration to wait.
-* 'a' is the encapsulated value.
--}
+-- | A functor implementing a syntactical "waiting" action.
 data Wait diff a = Wait
   { getDiff :: diff
+      -- ^ The duration to wait.
   , awaited :: a
+      -- ^ The encapsulated value.
   }
   deriving (Functor, Eq, Show)
 
@@ -54,6 +53,8 @@ instance Eq diff => Eq1 (Wait diff) where
 -- | Compare by the time difference, regardless of the value.
 compareWait :: Ord diff => Wait diff a -> Wait diff a -> Ordering
 compareWait = comparing getDiff
+
+-- * 'ScheduleT'
 
 {- |
 Values in @ScheduleT diff m@ are delayed computations with side effects in 'm'.
@@ -78,6 +79,19 @@ runScheduleIO
   :: (MonadIO m, Integral n)
   => ScheduleT n m a -> m a
 runScheduleIO = runScheduleT $ liftIO . threadDelay . (* 1000) . fromIntegral
+
+-- | Formally execute all waiting actions,
+--   returning the final value and all moments when the schedule would have waited.
+execScheduleT :: Monad m => ScheduleT diff m a -> m (a, [diff])
+execScheduleT action = do
+  free <- runFreeT action
+  case free of
+    Pure a -> return (a, [])
+    Free (Wait diff cont) -> do
+      (a, diffs) <- execScheduleT cont
+      return (a, diff : diffs)
+
+-- * 'YieldT'
 
 -- | A monad for scheduling with cooperative concurrency.
 type YieldT = ScheduleT ()
@@ -163,11 +177,3 @@ instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT di
             unwrap <- lift $ runFreeT cont
             shiftList $ sortBy compareFreeFWait $ unwrap :| (Free <$> waits)
 
-execScheduleT :: Monad m => ScheduleT diff m a -> m (a, [diff])
-execScheduleT action = do
-  free <- runFreeT action
-  case free of
-    Pure a -> return (a, [])
-    Free (Wait diff cont) -> do
-      (a, diffs) <- execScheduleT cont
-      return (a, diff : diffs)
