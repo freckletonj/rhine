@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Control.Monad.Schedule.Class where
 
 
@@ -21,6 +23,15 @@ class MonadSchedule m where
   --   and return the result of the first finishers,
   --   together with completions for the unfinished actions.
   schedule :: NonEmpty (m a) -> m (NonEmpty a, [m a])
+
+-- | Any monad can be trivially scheduled by executing all actions sequentially.
+newtype RoundRobin m a = RoundRobin { unRoundRobin :: m a }
+  deriving (Functor, Applicative, Monad)
+
+-- | Execute all actions in sequence and return their result when all of them are done.
+--   Essentially, this is 'sequenceA'.
+instance Monad m => MonadSchedule (RoundRobin m) where
+  schedule = sequenceA >>> fmap (, [])
 
 {- |
 Fork all actions concurrently in separate threads and wait for the first one to complete.
