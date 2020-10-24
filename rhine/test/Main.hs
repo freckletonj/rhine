@@ -47,7 +47,7 @@ tests =
     ]
   ]
 
-type Schedule a = ScheduleT Integer Identity a
+type Schedule a = ScheduleT Integer (RoundRobin Identity) a
 
 data Script a = Script a [Integer]
   deriving Show
@@ -82,12 +82,14 @@ rhs = fromList [wait 42, wait 23]
 essence :: NonEmpty (Schedule ()) -> ([[Integer]], [Integer])
 essence = schedule
   >>> execScheduleT
+  >>> unRoundRobin
   >>> runIdentity
-  >>> first (snd >>> fmap (execScheduleT >>> runIdentity >>> snd))
+  >>> first (snd >>> fmap (execScheduleT >>> unRoundRobin >>> runIdentity >>> snd))
 -- essence = fmap (runIdentity . execScheduleT) . snd . runIdentity . execScheduleT . schedule
 
 essence' :: NonEmpty (Schedule a) -> (NonEmpty a, [Integer])
 essence' = schedule
   >>> execScheduleT
+  >>> unRoundRobin
   >>> runIdentity
   >>> first fst

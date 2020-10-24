@@ -113,14 +113,10 @@ instance Ord diff => MonadSchedule (Wait diff) where
 -- | Run each action one step until it is discovered which action(s) are pure, or yield next.
 --   If there is a pure action, it is returned,
 --   otherwise all actions are shifted to the time when the earliest action yields.
-instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT diff m) where
-  schedule
-    =   fmap runFreeT
-    >>> sequenceA
-    >>> fmap (sortBy compareFreeFWait >>> shiftList)
-    >>> lift
-    >>> join
-    >>> fmap (second $ fmap (FreeT . return . Free))
+instance (Ord diff, TimeDifference diff, Monad m, MonadSchedule m) => MonadSchedule (ScheduleT diff m) where
+  schedule actions = do
+    (frees, delayed) <- lift $ schedule $ runFreeT <$> actions
+    shiftList (sortBy compareFreeFWait frees) $ FreeT <$> delayed
     where
       compareFreeFWait
         :: Ord diff
@@ -167,13 +163,17 @@ instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT di
       -- until one action returns as pure.
       -- Return its result, together with the remaining free actions.
       shiftList
-        :: (TimeDifference diff, Ord diff, Monad m)
+        :: (TimeDifference diff, Ord diff, Monad m, MonadSchedule m)
         => NonEmpty (FreeF (Wait diff) a (ScheduleT diff m a))
-        -> ScheduleT diff m (NonEmpty a, [Wait diff (ScheduleT diff m a)])
-      shiftList actions = case shiftListOnce actions of
-        Left (a, freefs) -> return (a, freefs)
+        -- ^ Actionable
+        -> [ScheduleT diff m a]
+        -- ^ Delayed
+        -> ScheduleT diff m (NonEmpty a, [ScheduleT diff m a])
+      shiftList actions delayed = case shiftListOnce actions of
+        -- Some actions returned. Wrap up the remaining ones.
+        Left (as, waits) -> return (as, delayed ++ ((FreeT . return . Free) <$> waits))
+        -- No action has returned.
+        -- Wait the remaining time and start scheduling again.
         Right (Wait diff (cont, waits)) -> do
-            wait diff
-            unwrap <- lift $ runFreeT cont
-            shiftList $ sortBy compareFreeFWait $ unwrap :| (Free <$> waits)
-
+          wait diff
+          schedule (cont :| delayed ++ ((FreeT . return . Free) <$> waits))
