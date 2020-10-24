@@ -25,6 +25,7 @@ import Data.MonadicStreamFunction.Async (concatS)
 -- base
 import Data.Maybe (catMaybes, maybeToList)
 import Data.Semigroup
+import Control.Monad.Event
 
 -- | A clock that selects certain subevents of type 'a',
 --   from the tag of a main clock.
@@ -40,7 +41,7 @@ data SelectClock cl a = SelectClock
   }
 
 
-instance (Monad m, Clock m cl) => Clock m (SelectClock cl a) where
+instance (Monad m, Clock m cl) => Clock (EventT (Tag cl) m) (SelectClock cl a) where
   type Time (SelectClock cl a) = Time cl
   type Tag  (SelectClock cl a) = a
   initClock SelectClock {..} = do
