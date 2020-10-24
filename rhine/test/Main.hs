@@ -86,7 +86,7 @@ essence = schedule
   >>> first (snd >>> fmap (execScheduleT >>> runIdentity >>> snd))
 -- essence = fmap (runIdentity . execScheduleT) . snd . runIdentity . execScheduleT . schedule
 
-essence' :: NonEmpty (Schedule a) -> (a, [Integer])
+essence' :: NonEmpty (Schedule a) -> (NonEmpty a, [Integer])
 essence' = schedule
   >>> execScheduleT
   >>> runIdentity

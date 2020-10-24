@@ -94,7 +94,7 @@ runYieldIO
 runYieldIO = runScheduleT $ const $ liftIO $ C.yield
 
 instance Ord diff => MonadSchedule (Wait diff) where
-  schedule waits = let (smallestWait :| waits') = N.sortBy compareWait waits in (, waits') <$> smallestWait
+  schedule waits = let (smallestWait :| waits') = N.sortBy compareWait waits in ((, waits') . pure) <$> smallestWait
 
 -- | Run each action one step until it is discovered which action(s) are pure, or yield next.
 --   If there is a pure action, it is returned,
@@ -106,7 +106,7 @@ instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT di
     >>> fmap (sortBy compareFreeFWait >>> shiftList)
     >>> lift
     >>> join
-    >>> fmap (second $ fmap (FreeT . return))
+    >>> fmap (second $ fmap (FreeT . return . Free))
     where
       compareFreeFWait
         :: Ord diff
@@ -143,10 +143,10 @@ instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT di
         :: TimeDifference diff
         => NonEmpty (FreeF (Wait diff) a b)
         -> Either
-             (a, [FreeF (Wait diff) a b]) -- Pure value has completed
+             (NonEmpty a, [Wait diff b]) -- Pure value has completed
              (Wait diff (b, [Wait diff b])) -- All values wait
       shiftListOnce actions = case partitionFreeF $ toList actions of
-        (a : as, waits) -> Left (a, (Pure <$> as) ++ (Free <$> waits))
+        (a : as, waits) -> Left (a :| as, waits)
         ([], Wait diff cont : waits) -> Right $ Wait diff (cont, shift diff <$> waits)
 
       -- Repeatedly shift the list by the smallest available waiting duration
@@ -155,7 +155,7 @@ instance (Ord diff, TimeDifference diff, Monad m) => MonadSchedule (ScheduleT di
       shiftList
         :: (TimeDifference diff, Ord diff, Monad m)
         => NonEmpty (FreeF (Wait diff) a (ScheduleT diff m a))
-        -> ScheduleT diff m (a, [FreeF (Wait diff) a (ScheduleT diff m a)])
+        -> ScheduleT diff m (NonEmpty a, [Wait diff (ScheduleT diff m a)])
       shiftList actions = case shiftListOnce actions of
         Left (a, freefs) -> return (a, freefs)
         Right (Wait diff (cont, waits)) -> do

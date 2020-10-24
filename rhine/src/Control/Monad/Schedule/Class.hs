@@ -5,8 +5,8 @@ module Control.Monad.Schedule.Class where
 import Control.Arrow
 import Control.Concurrent
 import Data.Either
-import Data.Foldable (forM_)
-import Data.List.NonEmpty as N
+import Data.Foldable (fold, forM_)
+import Data.List.NonEmpty hiding (length)
 import Data.Function
 
 -- transformers
@@ -18,9 +18,9 @@ import Control.Monad.Trans.Class
 -- | 'Monad's in which actions can be scheduled concurrently.
 class MonadSchedule m where
   -- | Run the actions concurrently,
-  --   and return the result of the first finisher,
+  --   and return the result of the first finishers,
   --   together with completions for the unfinished actions.
-  schedule :: NonEmpty (m a) -> m (a, [m a])
+  schedule :: NonEmpty (m a) -> m (NonEmpty a, [m a])
 
 {- |
 Fork all actions concurrently in separate threads and wait for the first one to complete.
@@ -37,18 +37,28 @@ instance MonadSchedule IO where
     var <- newEmptyMVar
     forM_ as $ \action -> forkIO $ putMVar var =<< action
     a <- takeMVar var
-    let remaining = replicate (N.length as - 1) $ takeMVar var
-    return (a, remaining)
+    as' <- drain var
+    let remaining = replicate (length as - 1 - length as') $ takeMVar var
+    return (a :| as', remaining)
+      where
+        drain :: MVar a -> IO [a]
+        drain var = do
+          aMaybe <- tryTakeMVar var
+          case aMaybe of
+            Just a -> do
+              as' <- drain var
+              return $ a : as'
+            Nothing -> return []
 
 -- TODO Needs dependency
 -- instance MonadSchedule STM where
 
 -- | Write in the order of scheduling:
---   The first action to return writes first.
+--   The first actions to return write first.
 instance (Monoid w, Functor m, MonadSchedule m) => MonadSchedule (WriterT w m) where
-  schedule = N.map runWriterT
+  schedule = fmap runWriterT
     >>> schedule
-    >>> fmap (assoc >>> first (second $ fmap WriterT))
+    >>> fmap (first (fmap fst &&& (fmap snd >>> fold)) >>> assoc >>> first (second $ fmap WriterT))
     >>> WriterT
     where
       assoc :: ((a, w), c) -> ((a, c), w)
@@ -58,7 +68,7 @@ instance (Monoid w, Functor m, MonadSchedule m) => MonadSchedule (WriterT w m) w
 --   The continuations keep this initial environment.
 instance (Monad m, MonadSchedule m) => MonadSchedule (ReaderT r m) where
   schedule actions = ReaderT $ \r
-    -> N.map (flip runReaderT r) actions
+    -> fmap (flip runReaderT r) actions
     & schedule
     & fmap (second $ fmap lift)
 
@@ -68,13 +78,16 @@ instance (Monad m, MonadSchedule m) => MonadSchedule (ReaderT r m) where
 --   and returns the first one that yields a value
 --   and a continuation for the other value.
 race
-  :: (Functor m, MonadSchedule m)
+  :: (Monad m, MonadSchedule m)
   => m a -> m b
   -> m (Either (a, m b) (m a, b))
 race aM bM = recoverResult <$> schedule ((Left <$> aM) :| [Right <$> bM])
   where
-    recoverResult (Left  a, [bM']) = Left (a, fromRight e <$> bM')
-    recoverResult (Right b, [aM']) = Right (fromLeft e <$> aM', b)
+    recoverResult :: Monad m => (NonEmpty (Either a b), [m (Either a b)]) -> Either (a, m b) (m a, b)
+    recoverResult (Left a :| [], [bM']) = Left (a, fromRight e <$> bM')
+    recoverResult (Right b :| [], [aM']) = Right (fromLeft e <$> aM', b)
+    recoverResult (Left a :| [Right b], []) = Left (a, return b)
+    recoverResult (Right b :| [Left a], []) = Right (return a, b)
     recoverResult _ = e
     e = error "race: Internal error"
 
